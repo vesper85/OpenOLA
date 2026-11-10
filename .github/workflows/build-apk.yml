@@ -1,0 +1,77 @@
+# Builds the OpenOLA Android APK from source/openola-flutter-mobile-source.zip
+# and publishes it as a GitHub Release so it can be downloaded straight on a phone.
+# Run it from the Actions tab -> "Build OpenOLA APK" -> "Run workflow".
+name: Build OpenOLA APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only to create the release with the APK attached
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+
+      - name: Extract Flutter source
+        run: |
+          mkdir -p build-src
+          unzip -q source/openola-flutter-mobile-source.zip -d build-src
+          ls build-src/mobile
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK platform 37 and NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-37" "build-tools;36.0.0" "ndk;28.2.13676358"
+
+      - name: Set up Flutter 3.47.6
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.6
+          cache: true
+
+      - name: Fetch Dart packages
+        working-directory: build-src/mobile
+        run: flutter pub get
+
+      - name: Build arm64 APK
+        working-directory: build-src/mobile
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+
+      - name: Rename and hash APK
+        id: apk
+        run: |
+          src=build-src/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          out="OpenOLA-build${GITHUB_RUN_NUMBER}-arm64-v8a.apk"
+          cp "$src" "$out"
+          sha256sum "$out" | tee "$out.sha256"
+          echo "file=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openola-apk
+          path: |
+            ${{ steps.apk.outputs.file }}
+            ${{ steps.apk.outputs.file }}.sha256
+
+      - name: Publish GitHub Release (easy phone download)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${GITHUB_RUN_NUMBER}" \
+            "${{ steps.apk.outputs.file }}" "${{ steps.apk.outputs.file }}.sha256" \
+            --title "OpenOLA APK build ${GITHUB_RUN_NUMBER}" \
+            --notes "Built by GitHub Actions from source/openola-flutter-mobile-source.zip at commit ${GITHUB_SHA}. Debug-signed, arm64 only."
