@@ -53,12 +53,15 @@ jobs:
 
       - name: Build arm64 APK
         working-directory: build-src/mobile
-        run: flutter build apk --release --split-per-abi --target-platform android-arm64
+        # The app defines two flavors ("public" and "super"); build the public edition.
+        run: flutter build apk --release --flavor public --split-per-abi --target-platform android-arm64
 
       - name: Rename and hash APK
         id: apk
         run: |
-          src=build-src/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          src=$(find build-src/mobile/build -name '*arm64-v8a*release*.apk' | head -1)
+          [ -n "$src" ] || { echo "No APK found"; find build-src/mobile/build -name '*.apk'; exit 1; }
+          echo "Using $src"
           out="OpenOLA-build${GITHUB_RUN_NUMBER}-arm64-v8a.apk"
           cp "$src" "$out"
           sha256sum "$out" | tee "$out.sha256"
